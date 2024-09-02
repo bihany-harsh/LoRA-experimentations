@@ -1,0 +1,4 @@
+.hypothesis/
+data/
+out_files/
+__pycache__/
