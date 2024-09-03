@@ -42,7 +42,7 @@ if __name__ == "__main__":
     classes = [i for i in range(5, 10)] # because to check for remaining 5 classes
 
     # load the state_dict
-    model.load_state_dict(torch.load("./out_files/MNIST_512_4_FFN.pt"))
+    model.load_state_dict(torch.load(f"./out_files/MNIST_{model.hidden_size}_{model.num_layers}.pt"))
     model.to(device)
 
     model.classes = classes

@@ -253,12 +253,14 @@ def test(model, test_dataset, batch_size, history, criterion, device=device):
 ####################################
 
 if __name__ == "__main__":
+    HIDDEN_SIZE = 512
+    NUM_LAYERS = 4
     criterion = nn.CrossEntropyLoss()
     classes = [i for i in range(5)]
 
     model = MNIST_FFN(
-        hidden_size=512,
-        num_layers=4,
+        hidden_size=HIDDEN_SIZE,
+        num_layers=NUM_LAYERS,
         classes=classes
     ).to(device)
 

@@ -167,7 +167,10 @@ def lora_experiment(
 
 
 if __name__ == "__main__":
-    ranks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+    HIDDEN_SIZE = 512
+    NUM_LAYERS = 4
+    # ranks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+    ranks = [2**i for i in range(int(math.log2(HIDDEN_SIZE))) + 1]
 
     histories = {}
 
@@ -184,8 +187,8 @@ if __name__ == "__main__":
 
     for rank in ranks:
         hist = lora_experiment(
-            512,
-            4,
+            HIDDEN_SIZE,
+            NUM_LAYERS,
             rank,
             original_classes,
             new_classes,
@@ -197,7 +200,7 @@ if __name__ == "__main__":
 
         histories[rank] = hist
 
-    with open(f"./out_files/MNIST_{512}_{4}_lora_experiment.pkl", "wb") as f:
+    with open(f"./out_files/MNIST_{HIDDEN_SIZE}_{NUM_LAYERS}_lora_experiment.pkl", "wb") as f:
         pickle.dump(histories, f)
 
     print("Done!")

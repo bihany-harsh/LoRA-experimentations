@@ -149,6 +149,8 @@ def pre_mult_lora_experiment(
     return history   
 
 if __name__ == "__main__":
+    HIDDEN_SIZE = 512
+    NUM_LAYERS = 4
     test_dataset = MNIST(root="./data", train=False, download=True, transform=mnist_transform)
     train_dataset = MNIST(root="./data", train=True, download=True, transform=mnist_transform)
 
@@ -160,7 +162,7 @@ if __name__ == "__main__":
 
     criterion = nn.CrossEntropyLoss()
 
-    pre_mult_lora_experiment(512, 4, original_classes, new_classes, train_dataset, validation_dataset, test_dataset, criterion)
+    pre_mult_lora_experiment(HIDDEN_SIZE, NUM_LAYERS, original_classes, new_classes, train_dataset, validation_dataset, test_dataset, criterion)
 
     print("Done!")
 

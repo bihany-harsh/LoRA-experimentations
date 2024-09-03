@@ -40,7 +40,7 @@ if __name__ == "__main__":
         num_layers=4,
         classes=[i for i in range(5)]
     )
-    model.load_state_dict(torch.load("./out_files/MNIST_512_4_FFN.pt"))
+    model.load_state_dict(torch.load(f"./out_files/MNIST_{model.hidden_size}_{model.num_layers}_FFN.pt"))
     model.to(device)
 
     model.classes = [i for i in range(5, 10)]
