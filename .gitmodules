@@ -1,0 +1,6 @@
+[submodule "LoRA"]
+	path = LoRA
+	url = https://github.com/microsoft/LoRA.git
+[submodule "AutoLoRA"]
+	path = AutoLoRA
+	url = https://github.com/ruz048/AutoLoRA.git
