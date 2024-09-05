@@ -1,4 +1,4 @@
 .hypothesis/
-data/
+mnist-experiments/data/
 out_files/
 __pycache__/
