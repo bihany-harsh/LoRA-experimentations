@@ -4,3 +4,6 @@
 [submodule "AutoLoRA"]
 	path = AutoLoRA
 	url = https://github.com/ruz048/AutoLoRA.git
+[submodule "Efficient-NLP"]
+	path = Efficient-NLP
+	url = https://github.com/huawei-noah/Efficient-NLP.git
