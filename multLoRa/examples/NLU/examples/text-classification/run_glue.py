@@ -238,8 +238,43 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
+    # Setup logging
+    # logging.basicConfig(
+    #     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+    #     datefmt="%m/%d/%Y %H:%M:%S",
+    #     handlers=[
+    #         logging.StreamHandler(sys.stdout), 
+    #         logging.FileHandler(f'{training_args.logging_dir}/run.log'),    
+    #     ],
+    # )
+    # logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
+
+    stream_handler = logging.StreamHandler(sys.stdout)
+    file_handler = logging.FileHandler(f'{training_args.logging_dir}/run.log')
+
+    # Set different logging levels
+    stream_handler.setLevel(logging.INFO)  # Set INFO level for console
+    file_handler.setLevel(logging.DEBUG)   # Set DEBUG level for file
+
+    # Define formatter
+    formatter = logging.Formatter(
+        fmt="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S"
+    )
+
+    # Add formatter to handlers
+    stream_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+
+    # Add handlers to the logger
+    logger.addHandler(stream_handler)
+    logger.addHandler(file_handler)
+
+    # Set logger level if necessary (or leave it to default)
+    logger.setLevel(logging.DEBUG if is_main_process(training_args.local_rank) else logging.WARN)
+
     torch.use_deterministic_algorithms(training_args.use_deterministic_algorithms)
-    logger.info("use_deterministic_algorithms: " + str(torch.are_deterministic_algorithms_enabled()))
+    logger.debug("use_deterministic_algorithms: " + str(torch.are_deterministic_algorithms_enabled()))
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -251,18 +286,10 @@ def main():
                 "Use --overwrite_output_dir to overcome."
             )
         elif last_checkpoint is not None:
-            logger.info(
+            logger.debug(
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
             )
-
-    # Setup logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
-    logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
 
     # Log on each process the small summary:
     logger.warning(
@@ -274,7 +301,7 @@ def main():
         transformers.utils.logging.set_verbosity_info()
         transformers.utils.logging.enable_default_handler()
         transformers.utils.logging.enable_explicit_format()
-    logger.info(f"Training/evaluation parameters {training_args}")
+    logger.debug(f"Training/evaluation parameters {training_args}")
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
@@ -313,7 +340,7 @@ def main():
                 raise ValueError("Need either a GLUE task or a test file for `do_predict`.")
 
         for key in data_files.keys():
-            logger.info(f"load a local file for {key}: {data_files[key]}")
+            logger.debug(f"load a local file for {key}: {data_files[key]}")
 
         if data_args.train_file.endswith(".csv"):
             # Loading a dataset from local csv files
@@ -385,8 +412,8 @@ def main():
     if model_args.apply_lora:
         if model_args.lora_path is not None:
             lora_state_dict = torch.load(model_args.lora_path)
-            logger.info(f"Apply LoRA state dict from {model_args.lora_path}.")
-            logger.info(lora_state_dict.keys())
+            logger.debug(f"Apply LoRA state dict from {model_args.lora_path}.")
+            logger.debug(lora_state_dict.keys())
             model.load_state_dict(lora_state_dict, strict=False)
         trainable_params.append('lora')
 
@@ -508,7 +535,7 @@ def main():
     # Log a few random samples from the training set:
     if training_args.do_train:
         for index in random.sample(range(len(train_dataset)), 3):
-            logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
+            logger.debug(f"Sample {index} of the training set: {train_dataset[index]}.")
 
     # Get the metric function
     if data_args.task_name is not None:
@@ -551,6 +578,13 @@ def main():
             new_rank = torch.randint(0,maximum_rank,(1,)).item()
             model.set_rank(new_rank, frozen=True)
 
+    # total params and total trainable params
+    total_params = sum(p.numel() for p in model.parameters())
+    total_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+    logger.debug(f"Total Parameters: {total_params}")
+    logger.debug(f"Total Trainable Parameters: {total_trainable_params}")
+
     # Initialize our Trainer
     trainer = Trainer(
         model=model,
@@ -590,7 +624,7 @@ def main():
 
     # Evaluation
     if training_args.do_eval:
-        logger.info("*** Evaluate ***")
+        logger.debug("*** Evaluate ***")
 
         # Loop to handle MNLI double evaluation (matched, mis-matched)
         tasks = [data_args.task_name]
