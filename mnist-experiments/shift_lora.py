@@ -63,6 +63,9 @@ class MNIST_FFN_LoRA(nn.Module):
 
         self.lora_As = nn.ParameterList()
         self.lora_Bs = nn.ParameterList()
+        
+        # Shifting Matrices
+        self.shifting_matrices = {}
 
         # lin layer
         self.lin_lora_A = nn.Parameter(torch.empty(channels*width*height, self.lora_rank))
@@ -87,18 +90,24 @@ class MNIST_FFN_LoRA(nn.Module):
         for n, p in self.named_parameters():
             if "lora" not in n:
                 p.requires_grad = False
-
-    def lora_linear(self, x, layer, lora_A, lora_B):
-        def shift(M):
-            n_rows, n_cols = M.shape
+                
+    def shift(self, M):
+        indices = None
+        shape = M.shape
+        if shape in self.shifting_matrices:
+            indices = self.shifting_matrices[shape]
+        else:
+            n_rows, n_cols = shape
             indices = torch.zeros([n_rows,n_cols])
             for i in range(n_rows):
                 for j in range(n_cols):
-                    indices[i][j] = ((i - j) % n_cols)
-            return torch.gather(M, 1, indices)
-        
+                    indices[i][j] = ((j - i) % n_cols)
+            self.shifting_matrices[shape] = indices
+        return torch.gather(M, 1, indices)
+
+    def lora_linear(self, x, layer, lora_A, lora_B):
         h = layer(x)
-        h += x @ shift(lora_A @ lora_B)
+        h += x @ self.shift(self, lora_A @ lora_B)
         return h
 
     def forward(self, x):

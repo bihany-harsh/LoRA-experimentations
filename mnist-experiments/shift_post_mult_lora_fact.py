@@ -67,6 +67,9 @@ class MNIST_FFN_Post_Mult_LoRA_Fact(nn.Module):
 
         self.lout_mt_lora_A = nn.Parameter(torch.empty(self.num_classes, self.post_mult_lora_rank))
         self.lout_mt_lora_B = nn.Parameter(torch.empty(self.post_mult_lora_rank, self.num_classes))
+        
+        # Shifting Matrices
+        self.shifting_matrices = {}
 
         self.initialize_lora_parameters()
 
@@ -91,19 +94,26 @@ class MNIST_FFN_Post_Mult_LoRA_Fact(nn.Module):
         for A, B in zip(self.mt_lora_As, self.mt_lora_Bs):
             init_lora_matrices(A, B)
         init_lora_matrices(self.lout_mt_lora_A, self.lout_mt_lora_B)
-
-    def post_mult_lora_linear(self, x, layer, mt_lora_A, mt_lora_B):
-        def shift(M):
-            n_rows, n_cols = M.shape
+        
+    def shift(self, M):
+        indices = None
+        shape = M.shape
+        if shape in self.shifting_matrices:
+            indices = self.shifting_matrices[shape]
+        else:
+            n_rows, n_cols = shape
             indices = torch.zeros([n_rows,n_cols])
             for i in range(n_rows):
                 for j in range(n_cols):
-                    indices[i][j] = ((i - j) % n_cols)
-            return torch.gather(M, 1, indices)
+                    indices[i][j] = ((j - i) % n_cols)
+            self.shifting_matrices[shape] = indices
+        return torch.gather(M, 1, indices)
+
+    def post_mult_lora_linear(self, x, layer, mt_lora_A, mt_lora_B):
         
         # Apply LoRA transformation: post-multiplication with full matrix LoRA
         h = layer(x)  # Linear layer first
-        h = h @ (shift(mt_lora_A @ mt_lora_B))  # Full Matrix LoRA transformation applied after the linear layer
+        h = h @ (self.shift(mt_lora_A @ mt_lora_B))  # Full Matrix LoRA transformation applied after the linear layer
         return h
     
     def forward(self, x):
