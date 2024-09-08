@@ -3,14 +3,14 @@ export LOCAL_RANK=0
 export CUBLAS_WORKSPACE_CONFIG=":16:8" # https://docs.nvidia.com/cuda/cublas/index.html#cublasApi_reproducibility
 export PYTHONHASHSEED=0
 export output_dir="./mnli"
-python -m torch.distributed.launch --use-env --nproc_per_node=$num_gpus \
+python -m torch.distributed.launch --use_env --nproc_per_node=$num_gpus \
 run_dora.py \
 --model_name_or_path roberta-base \
 --task_name mnli \
 --do_train \
 --do_eval \
 --max_seq_length 512 \
---per_device_train_batch_size 8 \
+--per_device_train_batch_size 16 \
 --learning_rate 5e-4 \
 --num_train_epochs 30 \
 --output_dir $output_dir/model \
