@@ -85,7 +85,7 @@ class MNIST_FFN_Post_Mult_LoRA_Fact(nn.Module):
             nn.init.kaiming_uniform_(A, a=math.sqrt(5))
             with torch.no_grad():
                 A[:,0] = 1
-                B = 0
+                B[:,:] = 0
                 B[0][0] = 1
     
 
@@ -102,7 +102,7 @@ class MNIST_FFN_Post_Mult_LoRA_Fact(nn.Module):
             indices = self.shifting_matrices[shape]
         else:
             n_rows, n_cols = shape
-            indices = torch.zeros([n_rows,n_cols])
+            indices = torch.zeros([n_rows,n_cols],device=device,dtype=torch.int64)
             for i in range(n_rows):
                 for j in range(n_cols):
                     indices[i][j] = ((j - i) % n_cols)

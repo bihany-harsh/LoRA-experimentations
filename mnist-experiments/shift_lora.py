@@ -98,7 +98,7 @@ class MNIST_FFN_LoRA(nn.Module):
             indices = self.shifting_matrices[shape]
         else:
             n_rows, n_cols = shape
-            indices = torch.zeros([n_rows,n_cols])
+            indices = torch.zeros([n_rows,n_cols],device=device,dtype=torch.int64)
             for i in range(n_rows):
                 for j in range(n_cols):
                     indices[i][j] = ((j - i) % n_cols)
@@ -107,7 +107,7 @@ class MNIST_FFN_LoRA(nn.Module):
 
     def lora_linear(self, x, layer, lora_A, lora_B):
         h = layer(x)
-        h += x @ self.shift(self, lora_A @ lora_B)
+        h += x @ self.shift(lora_A @ lora_B)
         return h
 
     def forward(self, x):
