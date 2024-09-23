@@ -23,7 +23,7 @@ from base_model import ModelHistory, fit, test, MNIST_FFN, create_dataloader, mn
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 
-# Shift-Post-Mult-LoRA-Factorizable ###################
+# Shift-Post-Mult-LoRA-Factorizable-Fix ###################
 
 class MNIST_FFN_Post_Mult_LoRA_Fact(nn.Module):
     def __init__(self, hidden_size, num_layers, classes, lora_rank=4):
@@ -112,8 +112,7 @@ class MNIST_FFN_Post_Mult_LoRA_Fact(nn.Module):
     def post_mult_lora_linear(self, x, layer, mt_lora_A, mt_lora_B):
         
         # Apply LoRA transformation: post-multiplication with full matrix LoRA
-        h = layer(x)  # Linear layer first
-        h = h @ (self.shift(mt_lora_A @ mt_lora_B))  # Full Matrix LoRA transformation applied after the linear layer
+        h = x @ layer.weight.data.T @ self.shift(mt_lora_A @ mt_lora_B) + layer.bias.data  # Full Matrix LoRA transformation applied after the linear layer
         return h
     
     def forward(self, x):
@@ -157,11 +156,11 @@ def post_mult_lora_experiment(
 
     optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 
-    print("Shift-Post-Mult-LoRA experiment: lora_rank =", rank)
+    print("Shift-Post-Mult-LoRA-Fix experiment: lora_rank =", rank)
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     total_params = sum(p.numel() for p in model.parameters())
 
-    print(f"For Shift-Post-Mult-LoRA rank: {rank}, #trainable_params: {trainable_params} and #total_params: {total_params}")
+    print(f"For Shift-Post-Mult-LoRA-Fix rank: {rank}, #trainable_params: {trainable_params} and #total_params: {total_params}")
 
     # Training the model
     history = fit(
@@ -188,10 +187,10 @@ def post_mult_lora_experiment(
     )
 
     # Save training history and model state
-    with open(f"./out_files/shift_post_mult_lora/MNIST_{model.hidden_size}_{model.num_layers}_rank_{rank}_shift_post_mult_lora_FFN_history.pkl", "wb") as f:
+    with open(f"./out_files/shift_post_mult_lora_fix/MNIST_{model.hidden_size}_{model.num_layers}_rank_{rank}_shift_post_mult_lora_fix_FFN_history.pkl", "wb") as f:
         pickle.dump(history, f)
 
-    torch.save(model.state_dict(), f"./out_files/shift_post_mult_lora/MNIST_{model.hidden_size}_{model.num_layers}_rank_{rank}_shift_post_mult_lora_FFN.pt")
+    torch.save(model.state_dict(), f"./out_files/shift_post_mult_lora_fix/MNIST_{model.hidden_size}_{model.num_layers}_rank_{rank}_shift_post_mult_lora_fix_FFN.pt")
 
     return history
 
@@ -240,7 +239,7 @@ if __name__ == "__main__":
         histories[rank] = hist
 
     # Save the results of all experiments
-    with open(f"./out_files/MNIST_{HIDDEN_SIZE}_{NUM_LAYERS}_shift_post_mult_lora_experiment.pkl", "wb") as f:
+    with open(f"./out_files/MNIST_{HIDDEN_SIZE}_{NUM_LAYERS}_shift_post_mult_lora_fix_experiment.pkl", "wb") as f:
         pickle.dump(histories, f)
 
     print("Done!")
