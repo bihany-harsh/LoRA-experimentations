@@ -36,20 +36,6 @@ mnist_transform = transforms.Compose(
             ]
 )
 
-train_dataset = MNIST(root="./data", train=True, download=True, transform=mnist_transform)
-test_dataset = MNIST(root="./data", train=False, download=True, transform=mnist_transform)
-
-print(f"len(train_dataset): {len(train_dataset)}, len(test_dataset): {len(test_dataset)}")
-
-CLASSES = {}
-for i in range(len(train_dataset.classes)):
-    CLASSES[i] = train_dataset.classes[i]
-
-print(f"CLASSES: {CLASSES}")
-
-generator = torch.Generator().manual_seed(42)
-train_dataset, validation_dataset = torch.utils.data.random_split(train_dataset, [45000, 15000], generator=generator)
-
 class FilteredDataset(Dataset):
     def __init__(self, dataset, classes):
         self.dataset = dataset
@@ -253,6 +239,14 @@ def test(model, test_dataset, batch_size, history, criterion, device=device):
 ####################################
 
 if __name__ == "__main__":
+
+    train_dataset = MNIST(root="./data", train=True, download=True, transform=mnist_transform)
+    test_dataset = MNIST(root="./data", train=False, download=True, transform=mnist_transform)
+
+    generator = torch.Generator().manual_seed(42)
+    train_dataset, validation_dataset = torch.utils.data.random_split(train_dataset, [45000, 15000], generator=generator)
+
+
     HIDDEN_SIZE = 512
     NUM_LAYERS = 4
     criterion = nn.CrossEntropyLoss()

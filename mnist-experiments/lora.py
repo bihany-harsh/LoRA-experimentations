@@ -141,7 +141,7 @@ def lora_experiment(
         train_dataset,
         validation_dataset,
         epochs=200,
-        batch_size=64,
+        batch_size=128,
         optimizer=optimizer,
         criterion=criterion,
         device=device,
@@ -170,7 +170,7 @@ if __name__ == "__main__":
     HIDDEN_SIZE = 512
     NUM_LAYERS = 4
     # ranks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
-    ranks = [2**i for i in range(int(math.log2(HIDDEN_SIZE))) + 1]
+    ranks = [2**i for i in range(int(math.log2(HIDDEN_SIZE)) + 1)]
 
     histories = {}
 

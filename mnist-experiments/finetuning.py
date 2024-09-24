@@ -55,7 +55,7 @@ if __name__ == "__main__":
         train_dataset=train_dataset,
         validation_dataset=validation_dataset,
         epochs=200,
-        batch_size=64,
+        batch_size=128,
         optimizer=optimizer,
         criterion=criterion,
         device=device,

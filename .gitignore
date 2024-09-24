@@ -1,5 +1,6 @@
 .hypothesis/
 mnist-experiments/data/
+cifar100-experiments/data/
 out_files/
 __pycache__/
 

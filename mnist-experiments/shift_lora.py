@@ -178,7 +178,7 @@ def lora_experiment(
     with open(f"./out_files/shift_lora/MNIST_{model.hidden_size}_{model.num_layers}_rank_{rank}_shift_lora_FFN_history.pkl", "wb") as f:
         pickle.dump(history, f)
 
-    torch.save(model.state_dict(), f"./out_files/shift_lora/MNIST_{model.hidden_size}_{model.num_layers}_rank_{rank}_shift_lora_FFN.pt")
+    torch.save(model.state_dict(), f"./out_files/lora/MNIST_{model.hidden_size}_{model.num_layers}_rank_{rank}_slora_FFN.pt")
 
     return history
 
@@ -186,8 +186,8 @@ def lora_experiment(
 if __name__ == "__main__":
     HIDDEN_SIZE = 512
     NUM_LAYERS = 4
-    ranks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
-    # ranks = [2**i for i in range(int(math.log2(HIDDEN_SIZE))) + 1]
+    # ranks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
+    ranks = [2**i for i in range(int(math.log2(HIDDEN_SIZE)) + 1)]
 
     histories = {}
 
@@ -217,7 +217,7 @@ if __name__ == "__main__":
 
         histories[rank] = hist
 
-    with open(f"./out_files/MNIST_{HIDDEN_SIZE}_{NUM_LAYERS}_shift_lora_experiment.pkl", "wb") as f:
+    with open(f"./out_files/MNIST_{HIDDEN_SIZE}_{NUM_LAYERS}_slora_experiment.pkl", "wb") as f:
         pickle.dump(histories, f)
 
     print("Done!")

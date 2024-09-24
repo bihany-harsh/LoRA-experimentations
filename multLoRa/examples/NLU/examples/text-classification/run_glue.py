@@ -67,6 +67,7 @@ task_to_keys = {
 }
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 @dataclass
@@ -224,6 +225,32 @@ class ModelArguments:
         metadata={"help": "Token Masking Probability"},
     )
 
+def setup_logging(training_args):
+    log_dir = training_args.logging_dir
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir, exist_ok=True)
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(logging.WARNING)
+
+    file_path = os.path.join(log_dir, "run.log")
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    file_handler = logging.FileHandler(file_path)
+    file_handler.setLevel(logging.DEBUG)
+
+    formatter = logging.Formatter(
+        fmt="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+    )
+    stream_handler.setFormatter(formatter)
+    file_handler.setFormatter(formatter)
+
+    logger.addHandler(stream_handler)
+    logger.addHandler(file_handler)
+
+    return logger
+
     
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -238,40 +265,7 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    # Setup logging
-    # logging.basicConfig(
-    #     format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-    #     datefmt="%m/%d/%Y %H:%M:%S",
-    #     handlers=[
-    #         logging.StreamHandler(sys.stdout), 
-    #         logging.FileHandler(f'{training_args.logging_dir}/run.log'),    
-    #     ],
-    # )
-    # logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
-
-    stream_handler = logging.StreamHandler(sys.stdout)
-    file_handler = logging.FileHandler(f'{training_args.logging_dir}/run.log')
-
-    # Set different logging levels
-    stream_handler.setLevel(logging.INFO)  # Set INFO level for console
-    file_handler.setLevel(logging.DEBUG)   # Set DEBUG level for file
-
-    # Define formatter
-    formatter = logging.Formatter(
-        fmt="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S"
-    )
-
-    # Add formatter to handlers
-    stream_handler.setFormatter(formatter)
-    file_handler.setFormatter(formatter)
-
-    # Add handlers to the logger
-    logger.addHandler(stream_handler)
-    logger.addHandler(file_handler)
-
-    # Set logger level if necessary (or leave it to default)
-    logger.setLevel(logging.DEBUG if is_main_process(training_args.local_rank) else logging.WARN)
+    logger = setup_logging(training_args)
 
     torch.use_deterministic_algorithms(training_args.use_deterministic_algorithms)
     logger.debug("use_deterministic_algorithms: " + str(torch.are_deterministic_algorithms_enabled()))

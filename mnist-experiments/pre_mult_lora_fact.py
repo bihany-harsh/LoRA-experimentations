@@ -22,7 +22,7 @@ from base_model import ModelHistory, fit, test, MNIST_FFN, create_dataloader, mn
 
 # DEVICE
 if torch.cuda.is_available():
-    device = torch.device("cuda")
+    device = torch.device("cuda:1")
 else:
     device = torch.device("cpu")
 
@@ -60,7 +60,6 @@ class MNIST_FFN_Pre_Mult_LoRA_Fact(nn.Module):
 
         self.pre_mult_lora_rank = lora_rank
 
-        # Full Matrix LoRA Transform Params for each layer
         self.lin_mt_lora_A = nn.Parameter(torch.empty(channels * width * height, self.pre_mult_lora_rank))
         self.lin_mt_lora_B = nn.Parameter(torch.empty(self.pre_mult_lora_rank, channels * width * height))
 
@@ -81,24 +80,29 @@ class MNIST_FFN_Pre_Mult_LoRA_Fact(nn.Module):
                 p.requires_grad = False
 
     def initialize_lora_parameters(self):
-        # Helper function to initialize A and B to approximate identity
         def init_lora_matrices(A, B):
             nn.init.kaiming_uniform_(A, a=math.sqrt(5))
             with torch.no_grad():
-                A_t = A.t()
-                B.copy_(torch.matmul(torch.inverse(torch.matmul(A_t, A)), A_t))
+                I = torch.eye(A.size(0), dtype=A.dtype, device=A.device)
+                # Solve the least-squares problem to approximate the pseudoinverse of A
+                lstsq_result = torch.linalg.lstsq(A, I)
+                A_pinv = lstsq_result.solution
+                B.copy_(A_pinv)
 
-        # Initialize all LoRA matrices
         init_lora_matrices(self.lin_mt_lora_A, self.lin_mt_lora_B)
         for A, B in zip(self.mt_lora_As, self.mt_lora_Bs):
             init_lora_matrices(A, B)
         init_lora_matrices(self.lout_mt_lora_A, self.lout_mt_lora_B)
 
     def pre_mult_lora_linear(self, x, layer, mt_lora_A, mt_lora_B):
-        # Apply LoRA transformation: pre-multiplication with full matrix LoRA
-        x_transformed = x @ (mt_lora_A @ mt_lora_B)  # Full Matrix LoRA transformation
-        h = layer(x_transformed)
-        return h
+        W = layer.weight  # (out_features, in_features)
+        # Order of operations: A @ (B @ W.T)
+        x = x @ (mt_lora_A @ (mt_lora_B @ W.T))
+
+        if layer.bias is not None:
+            x += layer.bias
+
+        return x
     
     def forward(self, x):
         x = torch.flatten(x, 1)
@@ -152,8 +156,8 @@ def pre_mult_lora_experiment(
         model,
         train_dataset,
         validation_dataset,
-        epochs=200,
-        batch_size=64,
+        epochs=500,
+        batch_size=128,
         optimizer=optimizer,
         criterion=criterion,
         device=device,
@@ -183,7 +187,7 @@ if __name__ == "__main__":
     HIDDEN_SIZE = 512
     NUM_LAYERS = 4
     # ranks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
-    ranks = [2**i for i in range(int(math.log2(HIDDEN_SIZE))) + 1]
+    ranks = [2**i for i in range(int(math.log2(HIDDEN_SIZE)) + 1)]
 
     histories = {}
 

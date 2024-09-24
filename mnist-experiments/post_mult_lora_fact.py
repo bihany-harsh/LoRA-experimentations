@@ -80,8 +80,11 @@ class MNIST_FFN_Post_Mult_LoRA_Fact(nn.Module):
         def init_lora_matrices(A, B):
             nn.init.kaiming_uniform_(A, a=math.sqrt(5))
             with torch.no_grad():
-                A_t = A.t()
-                B.copy_(torch.matmul(torch.inverse(torch.matmul(A_t, A)), A_t))
+                I = torch.eye(A.size(0), dtype=A.dtype, device=A.device)
+
+                lstsq_result = torch.linalg.lstsq(A, I)
+                A_pinv = lstsq_result.solution
+                B.copy_(A_pinv)
 
         # Initialize all LoRA matrices
         init_lora_matrices(self.lin_mt_lora_A, self.lin_mt_lora_B)
@@ -90,10 +93,14 @@ class MNIST_FFN_Post_Mult_LoRA_Fact(nn.Module):
         init_lora_matrices(self.lout_mt_lora_A, self.lout_mt_lora_B)
 
     def post_mult_lora_linear(self, x, layer, mt_lora_A, mt_lora_B):
-        # Apply LoRA transformation: post-multiplication with full matrix LoRA
-        h = layer(x)  # Linear layer first
-        h = h @ (mt_lora_A @ mt_lora_B)  # Full Matrix LoRA transformation applied after the linear layer
-        return h
+        # # Apply LoRA transformation: post-multiplication with full matrix LoRA
+        W = layer.weight # (out_features, in_features)
+        x = x @ ((W.T @ mt_lora_A) @ mt_lora_B)
+
+        if layer.bias is not None:
+            x += layer.bias
+
+        return x
     
     def forward(self, x):
         x = torch.flatten(x, 1)
@@ -147,8 +154,8 @@ def post_mult_lora_experiment(
         model,
         train_dataset,
         validation_dataset,
-        epochs=200,
-        batch_size=64,
+        epochs=500,
+        batch_size=128,
         optimizer=optimizer,
         criterion=criterion,
         device=device,
@@ -178,7 +185,7 @@ if __name__ == "__main__":
     HIDDEN_SIZE = 512
     NUM_LAYERS = 4
     # ranks = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
-    ranks = [2**i for i in range(int(math.log2(HIDDEN_SIZE))) + 1]
+    ranks = [2**i for i in range(int(math.log2(HIDDEN_SIZE)) + 1)]
 
     histories = {}
 
