@@ -5,6 +5,7 @@ import sys
 import torch
 from dataclasses import dataclass, field
 from typing import Optional
+# import evaluate
 
 import numpy as np
 from datasets import load_dataset, load_metric
@@ -22,17 +23,25 @@ from transformers import (
     TrainingArguments,
     default_data_collator,
     set_seed,
+    TrainerCallback,
 )
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 
 from peft import LoraConfig, get_peft_model
 
 task_to_keys = {
+    "cola": ("sentence", None),
     "mnli": ("premise", "hypothesis"),
+    "mrpc": ("sentence1", "sentence2"),
+    "qnli": ("question", "sentence"),
+    "qqp": ("question1", "question2"),
+    "rte": ("sentence1", "sentence2"),
+    "sst2": ("sentence", None),
+    "stsb": ("sentence1", "sentence2"),
+    "wnli": ("sentence1", "sentence2"),
 }
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 # CREDITS: github.com/microsoft/LoRA
 
@@ -145,31 +154,31 @@ class ModelArguments:
         metadata={"help": "Token Masking Probability"},
     )
 
-def setup_logging(training_args):
-    log_dir = training_args.logging_dir
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir, exist_ok=True)
+# def setup_logging(training_args):
+#     log_dir = training_args.logging_dir
+#     if not os.path.exists(log_dir):
+#         os.makedirs(log_dir, exist_ok=True)
 
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.WARNING)
+#     stream_handler = logging.StreamHandler()
+#     stream_handler.setLevel(logging.WARNING)
 
-    file_path = os.path.join(log_dir, "run.log")
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    file_handler = logging.FileHandler(file_path)
-    file_handler.setLevel(logging.DEBUG)
+#     file_path = os.path.join(log_dir, "run.log")
+#     if os.path.exists(file_path):
+#         os.remove(file_path)
+#     file_handler = logging.FileHandler(file_path)
+#     file_handler.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter(
-        fmt="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-    )
-    stream_handler.setFormatter(formatter)
-    file_handler.setFormatter(formatter)
+#     formatter = logging.Formatter(
+#         fmt="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
+#         datefmt="%m/%d/%Y %H:%M:%S",
+#     )
+#     stream_handler.setFormatter(formatter)
+#     file_handler.setFormatter(formatter)
 
-    logger.addHandler(stream_handler)
-    logger.addHandler(file_handler)
+#     logger.addHandler(stream_handler)
+#     logger.addHandler(file_handler)
 
-    return logger
+#     return logger
 
 
 def main():
@@ -182,37 +191,47 @@ def main():
 
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    logger = setup_logging(training_args)
+    # torch.use_deterministic_algorithms(training_args.use_deterministic_algorithms)
+    # logger.info("use_deterministic_algorithms: " + str(torch.are_deterministic_algorithms_enabled()))
 
     local_rank = int(os.environ.get('LOCAL_RANK', -1))
 
-    logger.warning(
-        f"Process rank: {local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
-        + f"distributed training: {bool(local_rank != -1)}, 16-bits training: {training_args.fp16}"
-    )
-    # Set the verbosity to info of the Transformers logger (on main process only):
-    if is_main_process(local_rank):
-        transformers.utils.logging.set_verbosity_info()
-        transformers.utils.logging.enable_default_handler()
-        transformers.utils.logging.enable_explicit_format()
-    logger.info(f"Training/evaluation parameters {training_args}")
-
-    set_seed(training_args.seed)
-
-    # detecting last checkpoint
     last_checkpoint = None
     if os.path.isdir(training_args.output_dir) and training_args.do_train and not training_args.overwrite_output_dir:
         last_checkpoint = get_last_checkpoint(training_args.output_dir)
         if last_checkpoint is None and len(os.listdir(training_args.output_dir)) > 0:
             raise ValueError(
-                f"Output directory ({training_args.output_dir}) already exists and is not empty."
+                f"Output directory ({training_args.output_dir}) already exists and is not empty. "
                 "Use --overwrite_output_dir to overcome."
             )
         elif last_checkpoint is not None:
-            logger.debug(
+            logger.info(
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
             )
+
+    # Setup logging
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+    logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
+
+    # Log on each process the small summary:
+    logger.warning(
+        f"Process rank: {training_args.local_rank}, device: {training_args.device}, n_gpu: {training_args.n_gpu}"
+        + f"distributed training: {bool(training_args.local_rank != -1)}, 16-bits training: {training_args.fp16}"
+    )
+    # Set the verbosity to info of the Transformers logger (on main process only):
+    if is_main_process(training_args.local_rank):
+        transformers.utils.logging.set_verbosity_info()
+        transformers.utils.logging.enable_default_handler()
+        transformers.utils.logging.enable_explicit_format()
+    logger.info(f"Training/evaluation parameters {training_args}")
+
+    # Set seed before initializing model.
+    set_seed(training_args.seed)
 
     # Load the dataset (ASSUMPTION: not from any file)
     datasets = load_dataset("glue", data_args.task_name)
@@ -234,12 +253,15 @@ def main():
             label_list.sort()
             logger.info(f"Label list: {label_list}")
             num_labels = len(label_list)
+            
+    # print(f"Traininig features: {datasets["train"].features}")
 
     # load the config, tokenizer and model
     config = AutoConfig.from_pretrained(
         model_args.model_name_or_path,
         finetuning_task=data_args.task_name,
         cache_dir=model_args.cache_dir,
+        # revision=model_args.model_revision,
         num_labels=num_labels,
         revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None,
@@ -274,9 +296,9 @@ def main():
 
     lora_model = get_peft_model(model, lora_config)
 
-    for name, param in lora_model.named_parameters():
-        if param.requires_grad:
-            logger.info(f"Trainable: {name}")
+    # for name, param in lora_model.named_parameters():
+    #     if param.requires_grad:
+    #         logger.info(f"Trainable: {name}")
 
     # Preprocessing the datasets
     if data_args.task_name is not None:
@@ -339,6 +361,7 @@ def main():
         return result
 
     datasets = datasets.map(preprocess_function, batched=True, load_from_cache_file=not data_args.overwrite_cache)
+    
     if training_args.do_train:
         if "train" not in datasets:
             raise ValueError("--do_train requires a train dataset")
@@ -368,11 +391,9 @@ def main():
     # Get the metric function
     if data_args.task_name is not None:
         metric = load_metric("glue", data_args.task_name)
+    
     # TODO: When datasets metrics include regular accuracy, make an else here and remove special branch from
     # compute_metrics
-
-    # You can define your custom compute_metrics function. It takes an `EvalPrediction` object (a namedtuple with a
-    # predictions and label_ids field) and has to return a dictionary string to float.
     def compute_metrics(p: EvalPrediction):
         preds = p.predictions[0] if isinstance(p.predictions, tuple) else p.predictions
         preds = np.squeeze(preds) if is_regression else np.argmax(preds, axis=1)
@@ -393,25 +414,14 @@ def main():
         data_collator = DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8)
     else:
         data_collator = None
-
-    # print the column names of the training dataset
-    logger.info(f"Columns of the training dataset: {train_dataset.column_names}")
-
-    # def add_decoder_input_ids(example):
-    #     # Adds 'decoder_input_ids' as a copy of 'input_ids'
-    #     example["decoder_input_ids"] = example["input_ids"]
-    #     return example
-
-    # # Apply the transformation to each dataset
-    # if training_args.do_train:
-    #     train_dataset = train_dataset.map(add_decoder_input_ids, batched=True)
-
-    # if training_args.do_eval:
-    #     eval_dataset = eval_dataset.map(add_decoder_input_ids, batched=True)
-
-    # if training_args.do_predict:
-    #     test_dataset = test_dataset.map(add_decoder_input_ids, batched=True)
-
+        
+    training_args.label_names=["labels"]
+    
+    # renaming columns required in new version
+    
+    train_dataset = train_dataset.rename_column("label", "labels")
+    eval_dataset = eval_dataset.rename_column("label", "labels")
+    
     trainer = Trainer(
         model=lora_model,
         args=training_args,
@@ -421,6 +431,8 @@ def main():
         tokenizer=tokenizer,
         compute_metrics=compute_metrics,
     )
+    
+    trainer.can_return_loss = True
 
     if training_args.do_train:
         checkpoint = None
@@ -432,6 +444,8 @@ def main():
             if AutoConfig.from_pretrained(model_args.model_name_or_path).num_labels == num_labels:
                 checkpoint = model_args.model_name_or_path
 
+        print("[main] starting training!!!")
+        
         train_result = trainer.train(resume_from_checkpoint=checkpoint)
         metrics = train_result.metrics
         max_train_samples = (

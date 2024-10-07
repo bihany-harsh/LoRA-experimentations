@@ -7,7 +7,7 @@ import torch.nn as nn
 
 from typing import Dict
 
-from .layers import LoRALayer
+from .layers import MultLoRALayer
 
 
 def mark_only_lora_as_trainable(model: nn.Module, bias: str = 'none') -> None:
@@ -22,7 +22,7 @@ def mark_only_lora_as_trainable(model: nn.Module, bias: str = 'none') -> None:
                 p.requires_grad = True
     elif bias == 'lora_only':
         for m in model.modules():
-            if isinstance(m, LoRALayer) and \
+            if isinstance(m, MultLoRALayer) and \
                 hasattr(m, 'bias') and \
                 m.bias is not None:
                     m.bias.requires_grad = True

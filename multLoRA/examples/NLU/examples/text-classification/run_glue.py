@@ -1,11 +1,5 @@
 #!/usr/bin/env python
 # coding=utf-8
-
-# Copyright (C) 2022. Huawei Technologies Co., Ltd. All rights reserved.
-# Changes made to the original code:
-# 2022.08.20 - Changed the training scheme - adding the DyLoRA scheme
-# 2022.08.20 - Dynamic evaluation for all the possible ranks in LoRA matrices
-
 # Copyright 2020 The HuggingFace Inc. team. All rights reserved.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -67,7 +61,6 @@ task_to_keys = {
 }
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
 
 
 @dataclass
@@ -192,6 +185,10 @@ class ModelArguments:
         default=None,
         metadata={"help": "LoRA r"},
     )
+    mult_lora_mode: Optional[str] = field(
+        default="pre",
+        metadata={"help": "pre or post"},
+    )
     lora_path: Optional[str] = field(
         default=None,
         metadata={"help": "The file path of LoRA parameters."},
@@ -225,32 +222,6 @@ class ModelArguments:
         metadata={"help": "Token Masking Probability"},
     )
 
-def setup_logging(training_args):
-    log_dir = training_args.logging_dir
-    if not os.path.exists(log_dir):
-        os.makedirs(log_dir, exist_ok=True)
-
-    stream_handler = logging.StreamHandler()
-    stream_handler.setLevel(logging.WARNING)
-
-    file_path = os.path.join(log_dir, "run.log")
-    if os.path.exists(file_path):
-        os.remove(file_path)
-    file_handler = logging.FileHandler(file_path)
-    file_handler.setLevel(logging.DEBUG)
-
-    formatter = logging.Formatter(
-        fmt="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-    )
-    stream_handler.setFormatter(formatter)
-    file_handler.setFormatter(formatter)
-
-    logger.addHandler(stream_handler)
-    logger.addHandler(file_handler)
-
-    return logger
-
     
 def main():
     # See all possible arguments in src/transformers/training_args.py
@@ -265,10 +236,8 @@ def main():
     else:
         model_args, data_args, training_args = parser.parse_args_into_dataclasses()
 
-    logger = setup_logging(training_args)
-
     torch.use_deterministic_algorithms(training_args.use_deterministic_algorithms)
-    logger.debug("use_deterministic_algorithms: " + str(torch.are_deterministic_algorithms_enabled()))
+    logger.info("use_deterministic_algorithms: " + str(torch.are_deterministic_algorithms_enabled()))
 
     # Detecting last checkpoint.
     last_checkpoint = None
@@ -280,10 +249,18 @@ def main():
                 "Use --overwrite_output_dir to overcome."
             )
         elif last_checkpoint is not None:
-            logger.debug(
+            logger.info(
                 f"Checkpoint detected, resuming training at {last_checkpoint}. To avoid this behavior, change "
                 "the `--output_dir` or add `--overwrite_output_dir` to train from scratch."
             )
+
+    # Setup logging
+    logging.basicConfig(
+        format="%(asctime)s - %(levelname)s - %(name)s -   %(message)s",
+        datefmt="%m/%d/%Y %H:%M:%S",
+        handlers=[logging.StreamHandler(sys.stdout)],
+    )
+    logger.setLevel(logging.INFO if is_main_process(training_args.local_rank) else logging.WARN)
 
     # Log on each process the small summary:
     logger.warning(
@@ -295,7 +272,7 @@ def main():
         transformers.utils.logging.set_verbosity_info()
         transformers.utils.logging.enable_default_handler()
         transformers.utils.logging.enable_explicit_format()
-    logger.debug(f"Training/evaluation parameters {training_args}")
+    logger.info(f"Training/evaluation parameters {training_args}")
 
     # Set seed before initializing model.
     set_seed(training_args.seed)
@@ -334,7 +311,7 @@ def main():
                 raise ValueError("Need either a GLUE task or a test file for `do_predict`.")
 
         for key in data_files.keys():
-            logger.debug(f"load a local file for {key}: {data_files[key]}")
+            logger.info(f"load a local file for {key}: {data_files[key]}")
 
         if data_args.train_file.endswith(".csv"):
             # Loading a dataset from local csv files
@@ -380,6 +357,7 @@ def main():
         apply_lora=model_args.apply_lora,
         lora_alpha=model_args.lora_alpha,
         lora_r=model_args.lora_r,
+        mult_lora_mode=model_args.mult_lora_mode,
         apply_adapter=model_args.apply_adapter,
         adapter_type=model_args.adapter_type,
         adapter_size=model_args.adapter_size,
@@ -406,8 +384,8 @@ def main():
     if model_args.apply_lora:
         if model_args.lora_path is not None:
             lora_state_dict = torch.load(model_args.lora_path)
-            logger.debug(f"Apply LoRA state dict from {model_args.lora_path}.")
-            logger.debug(lora_state_dict.keys())
+            logger.info(f"Apply LoRA state dict from {model_args.lora_path}.")
+            logger.info(lora_state_dict.keys())
             model.load_state_dict(lora_state_dict, strict=False)
         trainable_params.append('lora')
 
@@ -529,7 +507,7 @@ def main():
     # Log a few random samples from the training set:
     if training_args.do_train:
         for index in random.sample(range(len(train_dataset)), 3):
-            logger.debug(f"Sample {index} of the training set: {train_dataset[index]}.")
+            logger.info(f"Sample {index} of the training set: {train_dataset[index]}.")
 
     # Get the metric function
     if data_args.task_name is not None:
@@ -559,25 +537,11 @@ def main():
         data_collator = DataCollatorWithPadding(tokenizer, pad_to_multiple_of=8)
     else:
         data_collator = None
-
-    class callback_step(transformers.TrainerCallback):
-        # DyLoRA Logic (of randomly sampling a rank)
-        def on_step_begin(self, args, state, control, model, **kwargs):
-
-            maximum_rank = model.get_dimension()
-
-            # current_rank = model.get_rank()
-
-            # randomly select a rank
-            new_rank = torch.randint(0,maximum_rank,(1,)).item()
-            model.set_rank(new_rank, frozen=True)
-
-    # total params and total trainable params
-    total_params = sum(p.numel() for p in model.parameters())
-    total_trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    logger.debug(f"Total Parameters: {total_params}")
-    logger.debug(f"Total Trainable Parameters: {total_trainable_params}")
+        
+    logger.info("** Trainable params **")
+    for name, param in model.named_parameters():
+        if param.requires_grad:
+            logger.info(name)
 
     # Initialize our Trainer
     trainer = Trainer(
@@ -589,8 +553,10 @@ def main():
         tokenizer=tokenizer,
         data_collator=data_collator,
     )
-
-    trainer.add_callback(callback_step)
+    
+    torch.autograd.set_detect_anomaly(True)
+    training_args.max_grad_norm = 1.0
+    training_args.gradient_accumulation_steps = 5
 
     # Training
     if training_args.do_train:
@@ -618,7 +584,7 @@ def main():
 
     # Evaluation
     if training_args.do_eval:
-        logger.debug("*** Evaluate ***")
+        logger.info("*** Evaluate ***")
 
         # Loop to handle MNLI double evaluation (matched, mis-matched)
         tasks = [data_args.task_name]
@@ -627,18 +593,14 @@ def main():
             tasks.append("mnli-mm")
             eval_datasets.append(datasets["validation_mismatched"])
 
-        # DyLoRA inference (inference over each rank)
         for eval_dataset, task in zip(eval_datasets, tasks):
-            for rank in range(0,model_args.lora_r):
-                print(f'--> eval rank={rank}')
-                trainer.model.set_rank(rank=rank) # set the test rank
-                metrics = trainer.evaluate(eval_dataset=eval_dataset)
+            metrics = trainer.evaluate(eval_dataset=eval_dataset)
 
-                max_val_samples = data_args.max_val_samples if data_args.max_val_samples is not None else len(eval_dataset)
-                metrics[f"eval_samples_r{rank}"] = min(max_val_samples, len(eval_dataset))
+            max_val_samples = data_args.max_val_samples if data_args.max_val_samples is not None else len(eval_dataset)
+            metrics["eval_samples"] = min(max_val_samples, len(eval_dataset))
 
-                trainer.log_metrics(f"eval_r{rank}", metrics)
-                trainer.save_metrics(f"eval_r{rank}", metrics)
+            trainer.log_metrics("eval", metrics)
+            trainer.save_metrics("eval", metrics)
 
     if training_args.do_predict:
         logger.info("*** Test ***")
@@ -651,24 +613,22 @@ def main():
             test_datasets.append(datasets["test_mismatched"])
 
         for test_dataset, task in zip(test_datasets, tasks):
-            test_dataset.remove_columns_("label")
             # Removing the `label` columns because it contains -1 and Trainer won't like that.
-            for rank in range(0,model_args.lora_r):
-                print(f'--> test rank={rank}')
-                predictions = trainer.predict(test_dataset=test_dataset).predictions
-                predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
+            test_dataset.remove_columns_("label")
+            predictions = trainer.predict(test_dataset=test_dataset).predictions
+            predictions = np.squeeze(predictions) if is_regression else np.argmax(predictions, axis=1)
 
-                output_test_file = os.path.join(training_args.output_dir, f"test_results_{task}_r{rank}.txt")
-                if trainer.is_world_process_zero():
-                    with open(output_test_file, "w") as writer:
-                        logger.info(f"***** Test results {task} r{rank} *****")
-                        writer.write("index\tprediction\n")
-                        for index, item in enumerate(predictions):
-                            if is_regression:
-                                writer.write(f"{index}\t{item:3.3f}\n")
-                            else:
-                                item = label_list[item]
-                                writer.write(f"{index}\t{item}\n")
+            output_test_file = os.path.join(training_args.output_dir, f"test_results_{task}.txt")
+            if trainer.is_world_process_zero():
+                with open(output_test_file, "w") as writer:
+                    logger.info(f"***** Test results {task} *****")
+                    writer.write("index\tprediction\n")
+                    for index, item in enumerate(predictions):
+                        if is_regression:
+                            writer.write(f"{index}\t{item:3.3f}\n")
+                        else:
+                            item = label_list[item]
+                            writer.write(f"{index}\t{item}\n")
 
 
 def _mp_fn(index):

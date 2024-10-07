@@ -107,6 +107,8 @@ class BertConfig(PretrainedConfig):
             lora alpha.
         lora_r (:obj:`int`, `optional`):
             lora r.
+        mult_lora_mode (:obj:`str`, `optional`):
+            mult lora mode.
         apply_adapter (:obj:`bool`, `optional`):
             apply adapter.
         adapter_type (:obj:`str`, `optional`):
@@ -150,6 +152,7 @@ class BertConfig(PretrainedConfig):
         apply_lora=False,
         lora_alpha=None,
         lora_r=None,
+        mult_lora_mode=None,
         apply_adapter=False,
         adapter_type=None,
         adapter_size=None,
@@ -175,6 +178,7 @@ class BertConfig(PretrainedConfig):
         self.apply_lora = apply_lora
         self.lora_alpha = lora_alpha
         self.lora_r = lora_r
+        self.mult_lora_mode = mult_lora_mode
         self.apply_adapter = apply_adapter
         self.adapter_type = adapter_type
         self.adapter_size = adapter_size

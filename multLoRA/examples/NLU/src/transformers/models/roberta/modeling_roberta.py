@@ -1,9 +1,4 @@
 # coding=utf-8
-
-# Copyright (C) 2022. Huawei Technologies Co., Ltd. All rights reserved.
-# Changes made to the original code:
-# 2022.08.20 - Changed the RoBerta model to support DyLoRA
-
 # Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
 # Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
 #
@@ -168,14 +163,14 @@ class RobertaSelfAttention(nn.Module):
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
         if config.apply_lora:
-            self.query = lora.Linear(config.hidden_size, self.all_head_size, config.lora_r, lora_alpha=config.lora_alpha)
+            self.query = lora.Linear(config.hidden_size, self.all_head_size, config.lora_r, lora_alpha=config.lora_alpha, mode=config.mult_lora_mode)
         else:
             self.query = nn.Linear(config.hidden_size, self.all_head_size)
         
         self.key = nn.Linear(config.hidden_size, self.all_head_size)
 
         if config.apply_lora:
-            self.value = lora.Linear(config.hidden_size, self.all_head_size, config.lora_r, lora_alpha=config.lora_alpha)
+            self.value = lora.Linear(config.hidden_size, self.all_head_size, config.lora_r, lora_alpha=config.lora_alpha, mode=config.mult_lora_mode)
         else:
             self.value = nn.Linear(config.hidden_size, self.all_head_size)
 
@@ -192,18 +187,6 @@ class RobertaSelfAttention(nn.Module):
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
 
-    def set_rank(self, rank, frozen=False):
-        self.query.set_rank(rank, frozen=frozen)
-        self.value.set_rank(rank, frozen=frozen)
-
-    def get_dimension(self):
-        assert self.query.get_dimension() == self.value.get_dimension()
-        return self.query.get_dimension()
-
-    def get_rank(self):
-        assert self.query.get_rank() == self.value.get_rank()
-        return self.query.get_rank()
-
     def forward(
         self,
         hidden_states,
@@ -215,6 +198,9 @@ class RobertaSelfAttention(nn.Module):
         output_attentions=False,
     ):
         mixed_query_layer = self.query(hidden_states)
+        num_nans = torch.isnan(mixed_query_layer).sum().item()
+        if num_nans > 0:
+            print(f"Number of NaNs in the mexed_query_layer: {num_nans}")
 
         # If this is instantiated as a cross-attention module, the keys
         # and values come from an encoder; the attention mask needs to be
@@ -253,6 +239,14 @@ class RobertaSelfAttention(nn.Module):
 
         # Take the dot product between "query" and "key" to get the raw attention scores.
         attention_scores = torch.matmul(query_layer, key_layer.transpose(-1, -2))
+        
+        num_nans = torch.isnan(value_layer).sum().item()
+        if num_nans > 0:
+            print(f"Number of NaNs in the value_layer: {num_nans}")
+        
+        num_nans = torch.isnan(attention_scores).sum().item()
+        if num_nans > 0:
+            print(f"Number of NaNs in the attention_scores: {num_nans}")
 
         if self.position_embedding_type == "relative_key" or self.position_embedding_type == "relative_key_query":
             seq_length = hidden_states.size()[1]
@@ -287,6 +281,10 @@ class RobertaSelfAttention(nn.Module):
             attention_probs = attention_probs * head_mask
 
         context_layer = torch.matmul(attention_probs, value_layer)
+        
+        num_nans = torch.isnan(context_layer).sum().item()
+        if num_nans > 0:
+            print(f"Number of NaNs in the context_layer: {num_nans}")
 
         context_layer = context_layer.permute(0, 2, 1, 3).contiguous()
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
@@ -325,15 +323,6 @@ class RobertaAttention(nn.Module):
         self.self = RobertaSelfAttention(config)
         self.output = RobertaSelfOutput(config)
         self.pruned_heads = set()
-
-    def set_rank(self, rank, frozen=False):
-        self.self.set_rank(rank, frozen=frozen)
-
-    def get_dimension(self):
-        return self.self.get_dimension()
-
-    def get_rank(self):
-        return self.self.get_rank()
 
     def prune_heads(self, heads):
         if len(heads) == 0:
@@ -431,22 +420,6 @@ class RobertaLayer(nn.Module):
         self.intermediate = RobertaIntermediate(config)
         self.output = RobertaOutput(config)
 
-    def set_rank(self, rank, frozen=False):
-        self.attention.set_rank(rank, frozen=frozen)
-        if self.add_cross_attention:
-            self.crossattention.set_rank(rank, frozen=frozen)
-
-    def get_dimension(self):
-        if self.add_cross_attention:
-            return self.cross_attention.get_dimension()
-        return self.attention.get_dimension()
-
-
-    def get_rank(self):
-        if self.add_cross_attention:
-            return self.cross_attention.get_rank()
-        return self.attention.get_rank()
-
     def forward(
         self,
         hidden_states,
@@ -523,18 +496,6 @@ class RobertaEncoder(nn.Module):
         self.config = config
         self.layer = nn.ModuleList([RobertaLayer(config) for _ in range(config.num_hidden_layers)])
 
-    def set_rank(self, rank, frozen=False):
-        for layer in self.layer:
-            layer.set_rank(rank, frozen=frozen)
-
-    def get_dimension(self):
-        for layer in self.layer:
-            return layer.get_dimension()
-
-    def get_rank(self):
-        for layer in self.layer:
-            return layer.get_rank()
-    
     def forward(
         self,
         hidden_states,
@@ -801,15 +762,6 @@ class RobertaModel(RobertaPreTrainedModel):
         self.pooler = RobertaPooler(config) if add_pooling_layer else None
 
         self.init_weights()
-
-    def set_rank(self, rank, frozen=False):
-        self.encoder.set_rank(rank, frozen=frozen)
-
-    def get_dimension(self):
-        return self.encoder.get_dimension()
-
-    def get_rank(self):
-        return self.encoder.get_rank()
 
     def get_input_embeddings(self):
         return self.embeddings.word_embeddings
@@ -1237,15 +1189,6 @@ class RobertaForSequenceClassification(RobertaPreTrainedModel):
         self.classifier = RobertaClassificationHead(config)
 
         self.init_weights()
-
-    def set_rank(self, rank, frozen=False):
-        self.roberta.set_rank(rank, frozen=frozen)
-
-    def get_dimension(self):
-        return self.roberta.get_dimension()
-
-    def get_rank(self):
-        return self.roberta.get_rank()
 
     @add_start_docstrings_to_model_forward(ROBERTA_INPUTS_DOCSTRING.format("batch_size, sequence_length"))
     @add_code_sample_docstrings(
