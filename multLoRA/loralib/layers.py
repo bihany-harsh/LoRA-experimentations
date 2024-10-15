@@ -16,7 +16,7 @@ class MultLoRALayer():
         lora_alpha: int, 
         lora_dropout: float,
         merge_weights: bool,
-        mode = "pre"
+        mode: str = "pre"
     ):
         self.r = r
         self.lora_alpha = lora_alpha
@@ -139,6 +139,9 @@ class Linear(nn.Linear, MultLoRALayer):
                 #     self.lora_B = nn.Parameter(self.weight.new_zeros((in_features, r)))
                 self.lora_A = nn.Parameter(self.weight.new_zeros((r, in_features)))
                 self.lora_B = nn.Parameter(self.weight.new_zeros((in_features, r)))
+            elif mode == "complete":
+                self.lora_A = nn.Parameter(self.weight.new_zeros((out_features, out_features)))
+                self.lora_A.register_hook(self._normalize_lora_A)
             else:
                 ValueError("[MultLoRA] mode must be either 'pre' or 'post'")
             self.scaling = self.lora_alpha / self.r
@@ -148,6 +151,13 @@ class Linear(nn.Linear, MultLoRALayer):
         if fan_in_fan_out:
             self.weight.data = self.weight.data.transpose(0, 1)
             self.original_weight_data = self.original_weight_data.transpose(0, 1)
+            
+    def _normalize_lora_A(self, grad):
+        # Normalize lora_A after gradients are applied
+        with torch.no_grad():
+            norm = self.lora_A.data.norm(dim=0, keepdim=True)
+            self.lora_A.data = self.lora_A.data / (norm + 1e-8)
+        return grad
 
     def reset_parameters(self):
         nn.Linear.reset_parameters(self)
@@ -162,9 +172,11 @@ class Linear(nn.Linear, MultLoRALayer):
             # nn.init.zeros_(self.lora_A)
             # with torch.no_grad():
             #     self.lora_A.data.copy_(torch.linalg.pinv(self.lora_B.data))
-            
-            nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-            nn.init.normal_(self.lora_B)
+            if self.mode == "complete":
+                nn.init.eye_(self.lora_A)
+            else:
+                nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
+                nn.init.normal_(self.lora_B)
             
 
     def train(self, mode: bool = True):
@@ -184,8 +196,10 @@ class Linear(nn.Linear, MultLoRALayer):
                 if self.r > 0:
                     if self.mode == "pre":
                         self.weight.data = self.lora_B @ (self.lora_A @ (self.original_weight_data))
-                    else:
+                    elif self.mode == "post":
                         self.weight.data = ((self.original_weight_data) @ self.lora_A) @ self.lora_B
+                    else:
+                        self.weight.data = (self.lora_A @ self.original_weight_data)
                 self.merged = True
 
     def forward(self, x: torch.Tensor):
@@ -201,8 +215,13 @@ class Linear(nn.Linear, MultLoRALayer):
                 # number of nan values in result
                 # print(f"LoRALinear forward : {torch.sum(torch.isnan(result))}")
                 return result
-            else:
+            elif self.mode == "post":
                 adapted_weight = (self.weight @ self.lora_B) @ self.lora_A * self.scaling
+                result = F.linear(x, T(adapted_weight), bias=self.bias)
+                return result
+            else:
+                # complete mode
+                adapted_weight = (self.lora_A @ self.weight) * self.scaling
                 result = F.linear(x, T(adapted_weight), bias=self.bias)
                 return result
         else:
